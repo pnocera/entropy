@@ -2,25 +2,20 @@ package main
 
 import (
 	"context"
-	"entropy/internal/model"
 	"entropy/internal/nanoid"
 	"fmt"
 	"github.com/charmbracelet/log"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/spf13/viper"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-var config *model.Config
+var NATS_ROOT_FS string = "C:\\temp"
 
 func main() {
-
-	config = initConfig()
 
 	// run embedded server and create client
 	nc, ns, err := RunEmbeddedServer(false, true)
@@ -32,14 +27,16 @@ func main() {
 		defer nc.Drain()
 	}
 
+	// create Jetstream context
 	js, err := jetstream.New(nc)
 	if err != nil {
-		log.Error("Error creating jetstream", "err", err)
+		log.Error("Error creating jetstream context", "err", err)
 		return
 	}
 
 	ctx := context.Background()
 
+	// create cleanup handler
 	stream, err := CreateWQStream(ctx, js, "cleanup_handler")
 	if err != nil {
 		log.Error("Error creating cleanup_handler stream", "err", err)
@@ -125,6 +122,7 @@ func main() {
 			_, err = kv.Update(ctx, "hello.world", []byte("Pierre"), 1)
 			time.Sleep(1000 * time.Millisecond)
 
+			// send a message to the cleanup_handler stream to tell job is done
 			subject := fmt.Sprintf("cleanup_handler.%s", id)
 			_, err = js.Publish(ctx, subject, []byte(""))
 			if err != nil {
@@ -160,15 +158,13 @@ func createKV(ctx context.Context, js jetstream.JetStream, name string) (jetstre
 }
 
 func RunEmbeddedServer(inProcess bool, enableLogging bool) (*nats.Conn, *server.Server, error) {
-	natsfs := filepath.Join(config.NATS_SERVER_ROOTFS, "nats-data")
+	natsfs := filepath.Join(NATS_ROOT_FS, "nats-data")
 	natsfs = strings.ReplaceAll(natsfs, "\\", "/")
 	// if there's a folder with a name that starts with a r, replace it with /r - Windows path confusion
 	natsfs = strings.ReplaceAll(natsfs, "\r", "/r")
 
-	// create folder if it doesn't exist
-	_ = os.MkdirAll(natsfs, os.ModePerm)
-
 	opts := &server.Options{
+
 		ServerName:         "entropy",
 		JetStream:          true,
 		JetStreamDomain:    "embedded",
@@ -203,37 +199,6 @@ func RunEmbeddedServer(inProcess bool, enableLogging bool) (*nats.Conn, *server.
 	}
 
 	return nc, ns, err
-
-}
-
-func initConfig() *model.Config {
-	exepath, _ := os.Executable()
-
-	rootfolder := filepath.Dir(exepath)
-	err := os.Chdir(rootfolder)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	viper.AddConfigPath(rootfolder)
-	viper.SetConfigType("env")
-	viper.SetConfigFile(".env")
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		log.Info("Using config file:", "filename", viper.ConfigFileUsed())
-	} else {
-		log.Error("Error reading config file:", "err", err)
-	}
-
-	conf := &model.Config{}
-	err = viper.Unmarshal(conf)
-	if err != nil {
-		log.Error("Error unmarshalling config", "err", err)
-		return nil
-	}
-	return conf
 
 }
 
