@@ -107,10 +107,10 @@ func main() {
 				for {
 					entry := <-watcher.Updates()
 					log.Debugf("Received entry %#v", entry)
-					if entry == nil {
-						watcher.Stop()
-						break
-					}
+					//if entry == nil {
+					//	watcher.Stop()
+					//	break
+					//}
 				}
 			}()
 
